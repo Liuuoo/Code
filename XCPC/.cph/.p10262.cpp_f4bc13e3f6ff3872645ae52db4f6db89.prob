@@ -1,0 +1,1 @@
+{"name":"Local: p10262","url":"c:\\Users\\LIU\\Desktop\\XCPC\\p10262.cpp","tests":[{"id":1753764717065,"input":"2\n102","output":"5"},{"id":1753764724159,"input":"2\n12342","output":"11"}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"c:\\Users\\LIU\\Desktop\\XCPC\\p10262.cpp","group":"local","local":true}

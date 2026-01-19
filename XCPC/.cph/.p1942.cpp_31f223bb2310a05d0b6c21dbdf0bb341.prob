@@ -1,0 +1,1 @@
+{"name":"Local: p1942","url":"c:\\Users\\LIU\\Desktop\\XCPC\\p1942.cpp","tests":[{"id":1754044371240,"input":"4\n0000\n011\n1011\n11011","output":"0000\n0110\n1001\n1111"}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"c:\\Users\\LIU\\Desktop\\XCPC\\p1942.cpp","group":"local","local":true}

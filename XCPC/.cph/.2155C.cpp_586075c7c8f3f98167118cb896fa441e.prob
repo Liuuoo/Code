@@ -1,0 +1,1 @@
+{"name":"Local: 2155C","url":"c:\\Users\\LIU\\Desktop\\XCPC\\2155C.cpp","tests":[{"id":1762245464733,"input":"7\n1\n1\n4\n4 4 3 2\n3\n1 3 2\n2\n2 1\n3\n2 2 2\n3\n3 2 3\n3\n3 2 2\n","output":""}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"c:\\Users\\LIU\\Desktop\\XCPC\\2155C.cpp","group":"local","local":true}

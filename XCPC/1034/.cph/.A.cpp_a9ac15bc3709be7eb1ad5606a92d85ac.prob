@@ -1,0 +1,1 @@
+{"name":"Local: A","url":"c:\\Users\\LIU\\Desktop\\XCPC\\1034\\A.cpp","tests":[{"id":1753877636024,"input":"5\n1\n2\n3\n4\n5\n","output":"Alice\nBob\nAlice\nAlice\nBob\n"}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"c:\\Users\\LIU\\Desktop\\XCPC\\1034\\A.cpp","group":"local","local":true}

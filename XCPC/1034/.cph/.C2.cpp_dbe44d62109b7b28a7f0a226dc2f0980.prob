@@ -1,0 +1,1 @@
+{"name":"Local: C2","url":"c:\\Users\\LIU\\Desktop\\XCPC\\1034\\C2.cpp","tests":[{"id":1753881155433,"input":"3\n6\n1 3 5 4 7 2\n4\n13 10 12 20\n7\n7 6 5 4 3 2 1\n","output":"100011\n1101\n1000001\n"}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"c:\\Users\\LIU\\Desktop\\XCPC\\1034\\C2.cpp","group":"local","local":true}

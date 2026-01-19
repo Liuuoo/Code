@@ -1,0 +1,1 @@
+{"name":"Local: B4069","url":"c:\\Users\\LIU\\Desktop\\XCPC\\B4069.cpp","tests":[{"id":1747916320426,"input":"3\n2\naaaa\naab\n2\naac\nbc\n1\ngesp","output":"1\n0\n0"}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"c:\\Users\\LIU\\Desktop\\XCPC\\B4069.cpp","group":"local","local":true}

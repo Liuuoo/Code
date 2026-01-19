@@ -1,0 +1,1 @@
+{"name":"Local: D","url":"c:\\Users\\LIU\\Desktop\\XCPC\\SHCPC\\D.cpp","tests":[{"id":1756271163653,"input":"6\n3 6 3 6\n7 4 5 4\n5 4 3 4\n2 4 3 5\n7 2 0 1222\n0 0 0 1","output":"Yes\r\nYes\r\nNo\r\nNo\r\nYes\r\n"}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"c:\\Users\\LIU\\Desktop\\XCPC\\SHCPC\\D.cpp","group":"local","local":true}
