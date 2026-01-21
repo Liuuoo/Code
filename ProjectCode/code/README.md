@@ -325,3 +325,88 @@ int main()
     // std::cout<<A2.getAverage();
 }
 ```
+
+## RAII与智能指针
+### RAII
+这两个东西被称为现代c++的灵魂。为了解决内存泄漏和资源泄露的问题，c++引入了RAII的概念。即资源生命周期结束即释放。
+现在有这样一份需求：
+你需要编写一个类，确保文件在任何情况下都能被正确关闭。
+- 类名： SafeFileHandler
+- 私有属性：`FILE * fp`
+- 构造函数：接收文件名和格式，"w"即fopen，注意异常的处理。
+- 析构函数：检查fp是否为nullptr，如果是，则调用fclose并打印一份日志"resource is released safely"
+- 核心工程约束：禁用拷贝 (Disable Copying)。 
+    - 为什么？ 如果你把对象 A 拷贝给对象 B，它们都指向同一个文件。A 销毁时关了文件，B 销毁时会再次尝试关闭已经关闭的文件（Double Free/Close），这会导致程序崩溃。
+    - 这项是AI给出的，我没太理解意思，但是我开始写代码，然后让AI给我诊断问题。
+
+```cpp
+#pragma once
+#include<iostream>
+#include<string>
+namespace myFileHander
+{
+    class SafeFileHander
+    {
+    private:
+        FILE * fp;
+    public:
+        SafeFileHander(const std::string filename)
+        {
+            fp=std::fopen(filename.c_str(),"w");
+            if(!fp)
+            {
+                throw std::runtime_error("无法打开文件："+filename);
+            }
+            else 
+            {
+                std::cout<<"文件正常打开\n";
+            }
+        }
+        ~SafeFileHander()
+        {
+            if(fp!=nullptr)
+            {
+                fclose(fp);
+                std::cout<<"resource is released safely!";
+            }
+        }
+
+        SafeFileHander(const SafeFileHander&) = delete;
+        SafeFileHander &operator=(const SafeFileHander&) = delete;
+
+
+        void write(const std::string &text)
+        {
+            if(fp) 
+            {
+                std::fputs(text.c_str(), fp);
+            }
+        }
+    };
+}
+```
+
+实际上c++的RAII就是使用C++析构函数在类生命周期结束时，会进行执行这一特性，完成的。
+然后我们上面有个疑问：核心工程约束：禁用拷贝 (Disable Copying)。 这是因为如果不禁用拷贝（这边指的是=的浅拷贝，实际上c++也很难做到深拷贝），那么当一个类结束时并且释放了资源地址时，另外一个类中的指针并没有进行更改，这就导致了又重新释放一次指针。但是当前指针地址已经被释放了，再次释放很可能导致程序崩溃。这边来进行详细的说明：
+### 栈和堆
+栈，用完即销毁。析构函数就是销毁前一定要做的事情。
+堆，空间非常大，我们调用的指针存放的就是堆空间的地址。不会自动销毁，因为自动销毁需要太多资源，效率不高。于是我们要注销堆上的东西时，需要手动处理，如`fclose()`。
+但是当一个堆上的东西已经被处理过了，再进行销毁时，程序很有可能崩溃。
+所以为了防止这样重复清理导致程序崩溃发生，我们一般禁止拷贝，或者使用引用计数（后续智能指针会学习）。
+### 销毁/资源的释放
+- 实际上在进行销毁和资源释放时，我们不是将数据给初始化或者擦去，而是将权限归还于操作系统。
+- 操作系统会划出一大块内存空间作为程序运行可分配的安全空间。这部分空间一般不会于操作系统起冲突。
+- 当我们申请一个地址，将地址存到指针中时，操作系统会将权限给我们。我们可以任意操作这块小的空间。操作系统会记录该空间不能再次进行分配。
+- 当我们不需要使用时，我们申请释放资源，实际上就是将操作权限还给操作系统。操作系统记录可分配当前空间。然后也许很不巧就分配出去了。
+- 所以当我们再次释放时，操作系统又会回收一次该权限。导致程序崩溃。流程可以这样：
+
+1. 你销毁了 101。
+2. 程序里的另一个模块（比如处理图片的模块）申请内存，操作系统把刚空出来的 101 分给了它。
+3. 你又执行了一次销毁（重复销毁）。
+4. 操作系统以为你在销毁你的东西，结果把图片模块正在使用的 101 强行收回了。
+5. 图片模块再次访问 101 时，发现内存权被回收了，或者数据被弄乱了，程序瞬间崩溃。
+
+然后 `SafeFileHander(const SafeFileHander&) = delete;`就申明，该类不能进行浅拷贝，编译器遇到=就会报错。
+
+### 智能指针
+实际上智能指针的作用就是不让我们自己写析构函数与delete，因为确实有很多人会忘记写。
