@@ -800,3 +800,230 @@ std::shared_ptr<Resource> get_resource(std::string id)
     }
 ```
 非常优雅。
+
+# 多线程
+实际上我之前学过一段时间的多线程，所以我对多线程实际上是比较了解的。也大致有印象，也许会用。我这次的学习主要就是再敲一敲示例即可，以项目为主。这章的结束我仍然会自己尝试写一个线程池，然后再让AI给出评分以及优质代码。
+## `std::thread`
+### 生命周期
+做好thread的生命周期管理。当创建`thread`后，一定需要调用`.join()`然后等待其执行结束，或者`.detach()`放在后台自生自灭。不然当`thread`的析构函数执行后，会导致程序直接崩溃。
+
+以下时`thread`的用法示例：
+```cpp
+void work()
+{
+    std::cout<<"正在工作...\n";
+}
+
+int main()
+{
+    std::thread t1(work);
+    if(t1.joinable())
+    {
+        t.join();
+    }
+}
+```
+### 参数传递问题
+thread的构造函数会默认拷贝传入的对象，所以当传入的参数是一个比较大的对象时，这边使用`ref()`显式地传入引用。否则即使函数使用&也是无效的。这边给出示例
+```cpp
+
+void wrok(int &id) // 这边仅仅声明&是无效的
+{
+    std::cout<<"第"<<id<<"号工具正在工作中...";
+}
+int main()
+{
+    int id;
+    for(int i=1;i<=4;i++)
+    {
+        std::thread t(work,std::ref(i));
+        if(t.joinable())
+        {
+            t.join();
+        }
+    }
+}
+```
+### C++20新特性`std::jthread`
+这个jthread遵循RAII
+- 当jthread离开作用域时，会自动调用join()
+- 内置stop token，可以安全的请求线程停止
+
+```cpp
+int main()
+{
+    std::jthread jt([](std::stop_token stoken) 
+    {
+        while(!stoken.stop_requested())
+        {
+            std::cout<<"线程运行中...\n";
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+        std::cout << "收到停止请求，退出。\n";
+    });
+    // jt 在此处析构，自动发送停止信号并 join
+}
+```
+### 练习
+**需求描述：**
+1.  创建一个函数，接受一个字符串 `name` 和一个整数 `times`。
+2.  在主线程中启动 5 个子线程，每个线程调用该函数。
+3.  函数内部逻辑：循环 `times` 次，打印当前线程的 ID（`std::this_thread::get_id()`）和它的名字。
+4.  **挑战**：确保主线程必须等待所有子线程打印完毕后，才打印 "All work done!" 并退出。
+
+以下是我的代码：
+```cpp
+#include<thread>
+#include<iostream>
+
+void test_case(std::string name,int time)
+{
+    for(int i=0;i<time;i++)
+    {
+        std::cout<<std::this_thread::get_id()<<" "<<name<<'\n';
+    }
+}
+
+int main()
+{
+    std::thread t1(test_case,"1",1);
+    std::thread t2(test_case,"2",2);;
+    std::thread t3(test_case,"3",3);;
+    std::thread t4(test_case,"4",4);;
+    std::thread t5(test_case,"5",5);;
+    t1.join();
+    t2.join();
+    t3.join();
+    t4.join();
+    t5.join();
+    std::cout<<"All work done!";
+}
+```
+但实际上我们在可以将之存放在`vector`中，就变得非常简洁
+```cpp
+#include<thread>
+#include<iostream>
+#include<vector>
+
+void test_case(std::string name,int time)
+{
+    for(int i=0;i<time;i++)
+    {
+        std::cout<<std::this_thread::get_id()<<" "<<name<<'\n';
+    }
+}
+
+int main()
+{
+    std::vector<std::thread> vec;
+    for(int i=0;i<50;i++)
+    {
+        vec.emplace_back(std::thread (test_case,std::to_string(i),i));
+        // thread是禁止拷贝的，所以这边直接加入时构建
+    }
+    for(auto &x:vec) // 这边如果不使用引用，编译器会报错。线程相关必须引用
+    {
+        if(x.joinable()) x.join();
+    }
+    std::cout<<"All work done!";
+}
+```
+这边就有一些新的问题出现。因为我们的cout虽然是线程安全的，但是他不保证原子性。一个线程还没打完换行符，另一个线程的字符就插进来了。
+于是我们引入锁来管理这些线程。
+
+## 互斥量`muteux`
+虽然 `std::mutex` 有 `.lock()` 和 `.unlock()` 方法，但在现代 C++ 中，**直接调用它们是不优雅且危险的**。
+
+> **风险点：** 如果你在 `lock()` 之后、`unlock()` 之前，代码抛出了异常或者提前 `return` 了，那么这把锁将永远无法释放。其他等待这把锁的线程会全部死锁（Deadlock）。
+
+所以我们这边也不进行muteux的示例，直接开始“智能锁”
+### `lock_guard`
+使用了RAII包装，消亡即释放。我们不需要手动的管理。但是少了一些灵活性。
+```cpp
+std::mutex mtx; // 全局互斥量
+
+int main()
+{
+    std::lock_guard<mutex>(mtx);
+    // 析构时即放开锁
+}
+```
+### 更灵活的锁`std::unique_guard`
+这个锁也遵循了RAII，然后支持中途开锁`.unlock()`以及关锁`.lock()`。开销比lock_guard大一点。
+
+### 练手1
+于是我们将刚刚的代码重构，使得cout不会存在这样的输出
+```
+366644767392078353549593539
+454024872170 179
+ 788
+  1509
+63919312126
+33472510 346216512102366
+```
+
+```cpp
+void test_case(std::string name,int time)
+{
+    for(int i=0;i<time;i++)
+    {
+        {
+            std::lock_guard<std::mutex> lock(mtx); 
+            std::cout<<std::this_thread::get_id()<<" "<<name<<'\n';
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // 适当休眠
+    }
+}
+```
+现在的输出就不会有问题了。然后这个锁的作用域是最小越好，这样效率才高。
+
+### 原子操作
+当我们对一个数据进行操作时，比如a++，cpu会严格按照三步进行
+1. 从内存中读入a的值到寄存器
+2. 寄存器中将a的值+1
+3. 将a的新的值写入内存
+然后将变量或者值套上`atomic<T>`即可实现将这三个顺序变成一个整体，也就是原子化。
+```cpp
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <atomic> // 必须包含这个头文件
+
+// 声明一个原子整数，初始值为 0
+std::atomic<int> g_counter(0); 
+
+void increase(int limit) {
+    for (int i = 0; i < limit; ++i) {
+        // 原子性的自增，不需要加锁！
+        g_counter++; 
+    }
+}
+
+int main() {
+    std::vector<std::jthread> threads;
+    for (int i = 0; i < 10; ++i) {
+        threads.emplace_back(increase, 10000);
+    }
+    
+    // 等待所有线程结束（jthread 自动处理）
+    // ...
+    
+    // 结果一定是 100,000，不会有任何偏差
+    std::cout << "Final count: " << g_counter.load() << std::endl;
+    return 0;
+}
+```
+
+### 练手2
+**需求描述：**
+
+1.  设置一个全局变量 `total_tickets = 100`。
+
+2.  创建 10 个线程，模拟 10 个售票窗口。
+
+3.  每个窗口不断执行：检查是否有余票 -> 有则减 1 并打印"窗口 X 售出一张，余票 Y" -> 模拟耗时（`sleep` 几毫秒）。
+
+4.  **关键点**：使用 `std::lock_guard` 确保 `total_tickets` 的修改是线程安全的。
+
+**预期效果：** 票数会严格从 100 递减到 0，不会出现两个窗口同时卖出同一张票，也不会出现票数变成负数的情况。
