@@ -5,7 +5,7 @@
 
     - 在工程中，如果程序其他地方不小心修改了 sum，或者在 count 为 0 时计算了平均值，程序就会产生不可预知的错误甚至崩溃
 
-    - **解决方案** 创建一个 Accumulator 类，将数据（属性）和逻辑（方法）封装在一起。外部代码禁止直接修改内部数据，只能通过你提供的“安全接口”进行交互。
+    - **解决方案** 创建一个 Accumulator 类，将数据（属性）和逻辑（方法）封装在一起。外部代码禁止直接修改内部数据，只能通过你提供的“安全接口”进行交互。  
 
 2. 具体实现：
 
@@ -263,7 +263,7 @@ Accumlator.hpp:
 #include<iostream>
 #include<limits>
 #include<type_traits>
-namespace MyAccumlator
+namespace MyAccumlator          
 {
     template<typename T> 
     class Accumlator
@@ -326,7 +326,7 @@ int main()
 }
 ```
 
-## RAII与智能指针
+# RAII与智能指针
 ### RAII
 这两个东西被称为现代c++的灵魂。为了解决内存泄漏和资源泄露的问题，c++引入了RAII的概念。即资源生命周期结束即释放。
 现在有这样一份需求：
@@ -410,3 +410,393 @@ namespace myFileHander
 
 ### 智能指针
 实际上智能指针的作用就是不让我们自己写析构函数与delete，因为确实有很多人会忘记写。
+
+#### std::unique_ptr
+工程中常用的智能指针，拥有对资源的唯一所有权。
+**不可拷贝：** 通过禁用内部构造函数，保证同一时间只能有一个指针指向这块内存。
+**自动释放：** 应该是在析构函数中加入了释放，当unique_ptr离开作用域时，会自动释放，这边调用delete释放资源，而不是先前示例中的fclose。
+**零开销：** 性能和裸指针几乎一样。
+
+##### 使用
+```cpp
+#include <memory>
+#include <iostream>
+
+void unique_demo()
+{
+    // 推荐写法：创建并管理一个 int (42) 资源
+    auto p1=std::make_unique<int> (42);
+    std::cout<<*p1<<std::endl;
+    // 不需要额外的释放
+}
+```
+##### 所有权转移（std::move）
+如果我们想将资源转移给别人，但禁止了拷贝，所以这边使用了move方法。
+```cpp
+void take_ownership(std::unique_ptr<int> p) {
+    std::cout << "我拿到了资源: " << *p << std::endl;
+} // 资源在这里被销毁！
+
+void move_demo() {
+    auto p1 = std::make_unique<int>(100);
+    
+    // take_ownership(p1); // 报错！禁止拷贝
+    
+    // 正确做法：使用 std::move
+    take_ownership(std::move(p1)); 
+    
+    // 此时 p1 已经变为空指针了，这是安全的
+    if (!p1) {
+        std::cout << "p1 现在变空了。" << std::endl;
+    }
+}
+```
+这个move需要理解一下，在编译器眼中，所有对象都可以归结于两种。一种是左值，另一种右值。
+左值是有持久身份的对象(int a)，右值是零时的没有身份的中间结果，如(a+b)。实际上可以理解为=右侧的。
+
+然后还有c++11的一个新特性就是`&&`右值引用。使用这个，就可以引用一个右值。比如我可以这样写：
+```cpp
+void func(const int&& x);
+
+func(10); // 10 是一个字面量（右值）
+```
+他就能识别出来。
+
+然后move的作用就是强制类型转化，将左值强转为右值。于是我们可以这要操作：
+```cpp
+class BigData {
+public:
+    int* data;
+    size_t size;
+
+    // 1. 拷贝构造函数 (接收左值引用)
+    BigData(const BigData& other) {
+        this->size = other.size;
+        this->data = new int[other.size]; // 分配新空间
+        std::copy(other.data, other.data + size, this->data); // 复制内容
+    }
+
+    // 2. 移动构造函数 (接收右值引用)
+    BigData(BigData&& other) noexcept {
+        this->data = other.data;  // 直接接管别人的指针！
+        this->size = other.size;
+        
+        other.data = nullptr;     // 把别人的指针置空，防止他析构时把这块内存删了
+        other.size = 0;
+    }
+};
+int main()
+{
+    BigData b = std::move(a);
+}
+```
+
+该程序非常有意思，当函数销毁时，p的生命周期也结束。由于p是智能指针，会跟着销毁，所以这边能非常安全的释放当前资源。
+
+##### vector
+vector在创建时会在栈中开辟24个字节，放置三个指针，分别是：
+-   **`begin`**：指向堆内存中数组的起始位置。
+
+-   **`end`**：指向当前最后一个有效元素的下一个位置（即 `size` 的终点）。
+
+-   **`end_of_storage`**：指向堆内存块的最末尾（即 `capacity` 的终点）。
+
+当发现end==end_of_storage时，会进行扩容。一般是1.5/2倍。扩容很简单粗暴，是在堆上申请1.5/2倍空间。
+- 如果元素标记``noexcept`就利用`move`将对象中的指针地址更换即可。旧指针就没用了。
+- 如果发现不能，就只能一个一个的进行copy
+然后释放旧地址上的资源。
+然后更新栈上指针的地址，改为新的地址。
+
+扩容时完整的生命周期是这样的：
+-   **申请新空间**：在堆上开辟 1.5 倍的原始内存。
+
+-   **移动构造（搬迁）**：
+
+    -   在新内存位置调用 `unique_ptr` 的移动构造函数。
+
+    -   新指针"偷"走地址，旧指针变 `nullptr`。
+
+    -   **注意**：此时旧内存里躺着一个 `nullptr` 的 `unique_ptr` 对象。
+
+-   **循环往复**：直到所有元素都完成搬迁。
+
+-   **旧对象析构**：`vector` 遍历旧内存，对每一个旧元素调用析构函数。对于 `unique_ptr` 来说，析构一个 `nullptr` 是安全且无事的。
+
+-   **释放旧内存**：最后调用 `operator delete` 把旧的整块空间还给系统。
+
+#### std::shared_ptr
+##### 介绍
+有时候，一个资源需要被多个模块同时使用，这个时候我们使用`shared_ptr`，该指针内置一个计数器。当拷贝一次，计数+1，析构一次,计数-1。当计数-1后==0时，将资源释放。
+##### 使用场景：
+当你无法确定谁会是最后一个使用资源的人时，才考虑使用 `std::shared_ptr`。因为它有额外的计数器开销，所以性能略低于 `unique_ptr`。
+##### 深入理解
+该指针实际上是在对上面开辟了一块很小的空间，我们把该控件称之为控制块。一个控制块中维护两个数字：
+1. 强引用计数：用于记录有多少个shared_ptr正在指向并使用这个资源
+2. 弱引用计数：用于记录有多少个weak_ptr在观察这个资源。
+
+##### 运作流程：
+
+-   **当你拷贝一个 `shared_ptr` 时**：它只是简单地把那个控制块里的"强引用计数"数字 **$+1$**（这是一个原子操作，非常快）。
+
+-   **当一个 `shared_ptr` 析构时**：它把数字 **$-1$**。
+
+-   **最后一步**：如果减完之后数字变成了 **0**，那么当前的这个 `shared_ptr` 就会负责把数据和控制块一起销毁。
+##### 问题
+**1. 循环引用** 当程序出现循环引用时，比如A引用了B，B又引用了A,那么计数器永远无法降到0。
+**2. 性能开销** 虽然快，但是不如unique_ptr快，所以非必要不使用。
+##### 循环引用问题
+我们这边再详细谈谈循环引用问题。
+
+shared_ptr被释放的必要条件是计数器降到0。假设这边有一个shared_ptr p1\p2，他们共享指向一块相同的内存，此时计数器为2。
+
+###### 1\. 核心解剖：`std::shared_ptr` 的真面目
+你以为 `shared_ptr` 就是一个指针，但它在内存里其实是一对"双胞胎"。当你声明 `std::shared_ptr<Node> p` 时，栈上占用了 **2 个原始指针**的大小：
+
+1.  **指向对象的指针**：用于访问你存储的数据（Node A）。
+
+2.  **指向控制块的指针**：这才是实现"生死协议"的核心大脑。
+
+**控制块里有什么**？
+
+每个被 `shared_ptr` 管理的对象，在堆上都有一个唯一的控制块，包含：
+
+-   **Strong Reference Count (强引用计数)**：决定对象何时销毁。
+
+-   **Weak Reference Count (弱引用计数)**：决定控制块何时销毁。
+
+-   **自定义删除器/分配器**等。
+
+* * * *
+
+###### 2\. 循环引用是如何"炼成"的？（底层步进）
+
+
+我们用你最熟悉的 Node 结构，看看到底是怎么一步步把内存"锁死"的。
+
+**第一步：创建独立的领地**
+
+
+```
+auto pA = std::make_shared<Node>();
+auto pB = std::make_shared<Node>();
+
+```
+
+-   **栈内存**：产生 `pA` 和 `pB`。
+
+-   **堆内存**：产生 **对象 A** 和其 **控制块 CA**，以及 **对象 B** 和其 **控制块 CB**。
+
+-   **状态**：
+
+    -   CA 的强引用计数 = 1（由 `pA` 持有）
+
+    -   CB 的强引用计数 = 1（由 `pB` 持有）
+
+**第二步：建立"死亡链接"**
+
+
+```
+pA->next = pB; // A 的成员变量 next（也是个 shared_ptr）指向了 B
+
+```
+
+-   这一步，**对象 B 的控制块 CB** 的强引用计数变成了 **2**（一个由栈上的 `pB` 持有，一个由堆上的 `A->next` 持有）。
+
+
+```
+pB->prev = pA; // B 的成员变量 prev（也是个 shared_ptr）指向了 A
+
+```
+
+-   这一步，**对象 A 的控制块 CA** 的强引用计数变成了 **2**（一个由栈上的 `pA` 持有，一个由堆上的 `B->prev` 持有）。
+
+**第三步：栈的崩塌（函数结束）**
+
+当函数执行完毕，栈内存被系统回收，`pA` 和 `pB` 消失。它们在消失前会履行最后的职责：**通知各自指向的控制块。**
+
+1.  `pA` 消失：CA 的强引用计数 **$2 \\rightarrow 1$**。
+
+2.  `pB` 消失：CB 的强引用计数 **$2 \\rightarrow 1$**。
+
+由于pA仅仅只是个栈上的指针，虽然会随着弹出而被释放。但不是主体，所以NodeA中的next不会被释放，于是NodeB仍然被引用，NodeB->pre也不会释放。
+#### std::weak_ptr
+weak_ptr是shared_ptr的观察者模式。他只能有一个shared_ptr生成或者由一个weak_ptr生成。他的特点就是不增加引用计数。所以shared_ptr不记录weak_ptr的引用，所以能很好解决上述的循环引用问题。
+之前提到，一个智能指针实际上是由两个指针组成。一个指针指向对象本身，另一个指针指向控制块。控制块中中比较复杂，但一定有强引用计数以及弱引用计数。
+- 强引用计数：用来记录有多少个shared_ptr指向该控制块，**当它变为0时，对象销毁**，但该控制块
+- 弱引用计数：用来记录有多少个weak_ptr指向该地址块并加1，1是指强引用计数本身对控制块的占用。当weak_ptr=0时，该控制块销毁。
+  
+weak_ptr不参与对象的生命周期，只参与控制块的生命周期。
+
+这边有一个weak_ptr的用法示例：
+```cpp
+#include <iostream>
+#include <memory>
+
+int main() {
+    auto shared = std::make_shared<int>(42);
+    std::weak_ptr<int> weak = shared; // 指向它，但不拥有它
+
+    // 检查对象是否还存在
+    if (auto observed = weak.lock()) { // lock() 尝试获取一个 shared_ptr
+        std::cout << "对象还在，值是: " << *observed << std::endl;
+    } else {
+        std::cout << "对象已经被销毁了" << std::endl;
+    }
+
+    shared.reset(); // 手动销毁对象
+
+    if (weak.expired()) { // 也可以用 expired() 检查
+        std::cout << "现在对象确实不在了" << std::endl;
+    }
+}
+```
+
+# 项目实战1：智能缓存管理器
+补充了一些基础语法，然后了解了RAII、智能指针。这边我们让AI帮忙结合背景与所学列出了一些需求。然后我将会实现这些需求。
+### 1\. 业务背景
+
+假设你在开发一个类似你之前设计的"毛衫供应链管理系统"的桌面客户端。系统需要从磁盘加载大量的针织花样图片（Pattern）。
+
+-   **痛点 1**：图片加载很慢，所以需要**缓存**（Cache）。
+
+-   **痛点 2**：内存有限，如果某个图片现在没有任何页面在使用，它应该被**自动释放**。
+
+-   **痛点 3**：如果多个模块同时请求同一张图片，它们应该**共享**同一个内存对象。
+
+### 2\. 核心功能需求
+
+-   **资源类 `Resource`**：
+
+    -   模拟一个大型资源（可以是一个 `std::vector<char>`）。
+
+    -   构造时打印 `"Loading resource [ID]..."`，析构时打印 `"Unloading resource [ID]..."`。
+
+-   **管理器类 `ResourceManager`**：
+
+    -   **接口 `get_resource(string id)`**：
+
+        1.  如果缓存中有这个资源且有效，直接返回给调用者。
+
+        2.  如果缓存中没有（或已失效），则加载资源，存入缓存并返回。
+
+    -   **返回类型**：必须返回一个**智能指针**，让调用者可以安全使用。
+
+### 3\. 硬核技术约束（这是精通的关键）
+
+1.  **所有权控制**：
+
+    -   调用者（各个功能模块）应该通过 `std::shared_ptr` 共同持有资源。只要还有一个模块在用，资源就不能消失。
+
+2.  **非侵入式缓存 (`std::weak_ptr`)**：
+
+    -   **核心挑战**：管理器内部的缓存字典（`std::map`）**不应该**增加资源的引用计数。
+
+    -   **理由**：如果缓存也持有 `shared_ptr`，那么资源将永远不会被释放（因为缓存一直抓着它）。
+
+    -   **要求**：缓存必须使用 `std::weak_ptr`。当最后一个外部 `shared_ptr` 销毁时，资源自动析构，此时缓存中的 `weak_ptr` 也会自动失效。
+
+3.  **自动清理（清理死项）**：
+
+    -   实现一个 `show_cache_status()` 函数，遍历缓存，打印哪些资源还活着，哪些已经变成了"空壳"。
+
+### 4\. 验证场景
+
+-   **场景 A（共享）**：模块 1 和模块 2 同时请求 `Pattern_A`，验证 `Loading` 只触发了一次，且引用计数变为 2。
+
+-   **场景 B（释放）**：模块 1 和 2 依次销毁，验证 `Unloading` 在最后一个模块销毁时**立即触发**。
+
+-   **场景 C（重载）**：资源被释放后，再次请求 `Pattern_A`，验证它会**重新加载**。
+
+* * * *
+
+### 为什么这个需求能让你精通？
+
+这个任务逼迫你处理以下三个进阶问题：
+
+1.  **打破循环/过度持有**：理解为什么缓存不能拥有所有权。
+
+2.  **提升为 `shared_ptr`**：练习使用 `weak_ptr.lock()` 来安全地探测并临时获取资源。
+
+3.  **线程安全性思考**（进阶）：虽然你可以先写单线程版，但你可以思考如果两个线程同时 `get_resource` 会发生什么。
+
+**这个需求比 `FileHandler` 复杂得多，它涉及到对象之间的动态博弈。**
+
+于是我写出了如下代码
+```cpp
+#pragma once
+#include<memory>
+#include<map>
+#include<string>
+#include"Resource.hpp"
+class auto_cahce_manager
+{
+private:
+    std::map<std::string,std::weak_ptr<Resource> > cache;
+public:
+    auto_cahce_manager()
+    {
+        std::cout<<"管理器创建成功!\n";
+    }
+    std::shared_ptr<Resource> get_resource(std::string id)
+    {
+        if(cache.count(id))
+        {
+            auto weak_ptr=cache[id];
+            if(auto observe=weak_ptr.lock())
+            {
+                std::cout<<"内存中捕获到"<<id<<"资源...\n";
+                return observe;
+            }
+            else
+            {
+                std::cout<<"内存中曾经捕获...\n";
+                // 需要创建一个资源，并将之放入set
+                // Resource resource = Resource(id);
+                auto shared_ptr=std::make_shared<Resource>(id);
+                auto weak_ptr=std::weak_ptr<Resource>(shared_ptr);
+                cache[id]=weak_ptr;
+                return shared_ptr;
+            }
+        }
+        else 
+        {
+            std::cout<<"内存中未捕获...\n";
+            // 需要创建一个资源，并将之放入set
+            // Resource resource = Resource(id);
+            auto shared_ptr=std::make_shared<Resource>(id);
+            auto weak_ptr=std::weak_ptr<Resource>(shared_ptr);
+            cache[id]=weak_ptr;
+            return shared_ptr;
+        }
+    }
+    ~auto_cahce_manager()
+    {
+        std::cout<<"资源全部释放,管理器退出...\n";
+    }
+
+    // auto_cahce_manager(const auto_cahce_manager&) = delete;
+    // auto_cahce_manager &operator=(const auto_cahce_manager&) = delete;
+};
+```
+然后这边有很多重复臃肿的代码，然后AI给出了他的写法，非常优雅。值得学习
+```cpp
+std::shared_ptr<Resource> get_resource(std::string id)
+    {
+        auto &weak_ptr=cache[id]; // 注意这边使用引用
+        auto shared_ptr=weak_ptr.lock();
+        if(shared_ptr)
+        {
+            std::cout<<"内存中捕获到"<<id<<"资源...\n";
+        }
+        else 
+        {
+            std::cout<<"内存中未捕获...\n";
+            // 需要创建一个资源，并将之放入set
+            // Resource resource = Resource(id);
+            shared_ptr=std::make_shared<Resource>(id);
+            weak_ptr=std::weak_ptr<Resource>(shared_ptr);
+        }            
+        return shared_ptr;
+    }
+```
+非常优雅。
