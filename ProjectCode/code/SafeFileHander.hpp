@@ -6,7 +6,7 @@ namespace myFileHander
     class SafeFileHander
     {
     private:
-        FILE * fp;
+        FILE *fp;
     public:
         SafeFileHander(const std::string filename)
         {

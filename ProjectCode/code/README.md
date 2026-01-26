@@ -1027,3 +1027,68 @@ int main() {
 4.  **关键点**：使用 `std::lock_guard` 确保 `total_tickets` 的修改是线程安全的。
 
 **预期效果：** 票数会严格从 100 递减到 0，不会出现两个窗口同时卖出同一张票，也不会出现票数变成负数的情况。
+```cpp
+#include<atomic>
+#include<mutex>
+#include<vector>
+#include<thread>
+#include<iostream>
+int sum=0;
+std::atomic<int> g_counter(100);
+std::mutex mtx;
+void sale()
+{
+    while(true)
+    {            
+        {
+            std::lock_guard<std::mutex> lg(mtx);
+            if(g_counter!=0)
+            {
+                
+                g_counter--;
+                std::cout<<std::this_thread::get_id()<<"nd saled "<<g_counter+1<<" ticket successfully!\n";
+            }
+            else break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+int main()
+{
+    // std::cout<<g_counter<<'\n';
+    std::vector<std::thread> vec(10);
+    for(int i=0;i<10;i++)
+    {
+        vec[i]=(std::thread (sale));
+    }
+    int i=1;
+    for(auto &x:vec)
+    {
+        if(x.joinable())x.join();
+    }
+    std::cout<<"nothing\n";
+}
+```
+这个代码很经典，然后很有讲究。所实话我虽然之前有些印象，但实际上我没想到。然后用了个有问题的代码。
+
+现在我觉得判别一个问题在并发下是否会出现问题。可以这样想：同时有多个请求，同时请求该函数，会发生什么。我之前是这样写的:
+```cpp
+while(g_counter!=0)
+{
+    {
+        std::lock_guard<std::mutex> lg(mtx);
+        g_counter--;
+        std::cout<<std::this_thread::get_id()<<"nd saled "<<g_counter+1<<" ticket successfully!\n";
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+}
+```
+这就是一个错误代码。虽然我加了锁了，处理了。但实际上g_counter访问与g_counter修改是两步。所以当counter==1，并且有多个线程同时请求时，counter将会变为负数。出现很多问题。
+
+最正确的方式应该是。留一个while在外面空转，让当前进程一直处于运行（睡眠后继续）、然后拿锁，判断全局变量是否正常，然后做出相应回应。
+
+然后发现实际上只会有一个线程可以操作这个counter所以，这边直接使用int即可。
+```cpp
+// std::atomic<int> g_counter(100);
+int g_counter = 100;
+```
