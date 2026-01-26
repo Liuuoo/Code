@@ -1015,7 +1015,7 @@ int main() {
 }
 ```
 
-### 练手2
+### 练手2：互斥量的简单的使用
 **需求描述：**
 
 1.  设置一个全局变量 `total_tickets = 100`。
@@ -1092,3 +1092,239 @@ while(g_counter!=0)
 // std::atomic<int> g_counter(100);
 int g_counter = 100;
 ```
+
+然后我我们发现，这边需要一直执行while，这时cpu实际上处于一种空转状态。再该代码中利用效率还可以，但是但我们换一个情景：
+### 练手3：生产-消费模式
+-   有一个面包架，最多只能放 1 个面包。
+
+-   **生产者线程**：负责做面包。如果架子上有，就睡觉；如果没有，就做一个放上去，并唤醒消费者。
+
+-   **消费者线程**：负责吃面包。如果架子上没有，就睡觉；如果有，就吃掉，并唤醒生产者。
+
+-   **效果**：控制台交替出现"制作面包"和"吃掉面包"，节奏整齐。
+
+一个单容量的生产-消费者模型。这个时候我写出了如下代码:
+```cpp
+#include<thread>
+#include<mutex>
+#include<iostream>
+#include<vector>
+
+std::mutex mtx;
+bool empty=true;
+
+void product()
+{
+    while(true)
+    {
+        {
+            std::lock_guard<std::mutex> lg(mtx);
+            if(empty==true)
+            {
+                std::cout<<"Producter porduct a bread!\n";
+                empty=false; // 表示生产好了
+            }
+        }
+        // 生产者0.1s检查一次
+        std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
+    }
+}
+
+void custome()
+{
+    // std::cout<<std::this_thread::get_id()<<'\n';
+    while(true)
+    {
+        {
+            std::lock_guard<std::mutex> lg(mtx);
+            if(empty==false)
+            {
+                empty=true;
+                std::cout<<std::this_thread::get_id()<<"customer eat 1 bread successfully!\n";
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500)); // 假设一个人吃5秒
+    }
+}
+
+int main()
+{
+    std::thread producter (product);
+    std::vector<std::thread> customers;
+    for(int i=0;i<10;i++)
+    {
+        customers.push_back(std::thread(custome));
+    }
+    producter.join();
+    for(auto &x:customers)
+    {
+        if(x.joinable()) x.join();
+    }
+
+}
+```
+但是实际上这个代码cpu利用率不高，因为消费者的很多时间都在都处于一种忙等待状态（因为有很多个消费者同时竞争一个资源，并且这一个资源也许制造的很慢）。然后c++有一种语法可以避免这个忙等待，让线程不需要运行时处于休眠状态，然后需要的时候使用通知唤醒即可。
+
+于是我们是用条件变量来完善这个代码，使之变成经典的生产-消费者模型。
+```cpp
+#include<thread>
+#include<mutex>
+#include<iostream>
+#include<vector>
+#include<queue>
+#include<condition_variable>
+
+std::mutex mtx;
+bool empty=true;
+std::queue<bool> q;
+std::condition_variable cv;
+
+void product()
+{
+    while(true) // 生产者这边仍然需要不停的进行生产
+    {
+        // 生产者1s产出一个
+        std::this_thread::sleep_for(std::chrono::seconds(1)); 
+        // 生产完成，将之放入队列
+        {
+            std::cout<<"producter "<<std::this_thread::get_id()<<" make one!\n";
+            std::lock_guard<std::mutex> lg(mtx);
+            q.push(true);
+        }
+        cv.notify_one();
+    }
+}
+
+void custome()
+{
+    while(true)
+    {
+        std::unique_lock<std::mutex> ul(mtx);
+        cv.wait(ul,[&]{return !q.empty();}); 
+        q.pop();
+        std::cout<<"customer "<<std::this_thread::get_id()<<" eat one!\n";
+        ul.unlock();
+        std::this_thread::sleep_for(std::chrono::milliseconds(500)); // 假设一个人吃0.5秒
+    }
+}
+
+int main()
+{
+    std::thread producter1 (product);
+    std::thread producter2 (product);
+    std::vector<std::thread> customers;
+    for(int i=0;i<10;i++)
+    {
+        customers.push_back(std::thread(custome));
+    }
+    producter1.join();
+    producter2.join();
+    for(auto &x:customers)
+    {
+        if(x.joinable()) x.join();
+    }
+}
+```
+这边使用condition_variable中的wait()使其休眠。等到生产完成后再唤醒。
+
+### 练手项目4：手写线程池
+具备以下"器官"：
+
+1.  **工作线程池 (`std::vector<std::thread>`)**：存放那些常驻后台、随时待命的工人们。
+
+2.  **任务队列 (`std::queue<std::function<void()>>`)**：存放用户提交的待处理逻辑。之所以用 `std::function<void()>`，是因为它能包装任何 Lambda 或函数。
+
+3.  **同步双子星**：
+
+    -   `std::mutex mtx`：保护任务队列的原子操作。
+
+    -   `std::condition_variable cv`：让空闲线程休眠，并在有新任务时唤醒它们。
+
+4.  **状态控制**：
+
+    -   `bool stop`：一个标志位，告诉线程池什么时候该"下班"了。
+  
+以下是我写出的代码：
+```cpp
+#pragma once
+#include<thread>
+#include<mutex>
+#include<vector>
+#include<condition_variable>
+#include<functional>
+#include<queue>
+#include<iostream>
+class ThreadPool
+{
+private:
+    std::condition_variable cv;
+    std::mutex mtx;
+    std::queue<std::function<void()>> task_queue;
+    bool stop=false;
+    std::vector<std::thread> workers;
+public:
+    ThreadPool(int num)
+    {
+        for(int i=0;i<num;i++)
+        {
+            workers.emplace_back(&ThreadPool::work, this);
+        }
+        // std::thread(manager());
+    }
+
+    void work() noexcept
+    {
+        while(true)
+        {
+            std::unique_lock<std::mutex> ul(mtx);
+            cv.wait(ul,[&]{
+                return (stop||!task_queue.empty());
+            });
+            if(stop && task_queue.empty()) return;
+            else
+            {
+                // operate
+                auto fnt=std::move(task_queue.front());
+                task_queue.pop();
+                ul.unlock();
+                std::cout<<"working...\n";
+                fnt();
+                // do zhe function
+            }
+        }
+    }
+
+    void enqueue(std::function<void()> f)
+    {
+        std::lock_guard<std::mutex> lg(mtx);
+        task_queue.push(std::move(f));
+        cv.notify_one();
+    }
+
+    ~ThreadPool()
+    {
+        {
+            std::lock_guard<std::mutex> lg(mtx);
+            stop=true;
+        }
+        cv.notify_all();
+        for(auto &x: workers)
+        {
+            if(x.joinable()) x.join();
+        }
+    }
+    ThreadPool(const ThreadPool&)=delete;
+    ThreadPool &operator=(const ThreadPool&)=delete;
+};
+```
+里面有很多的细节，在我第一次完成时都没有考虑到位。然后类中的线程有特定的语法。很奇怪。可以用上述代码中的写法，也可以使用lambda表达式完成。
+```cpp
+workers.emplace_back([this] { this->work(); });
+```
+- 里面的work采取的是while(true)的方法是，最开始我写的是while(empty==false)，这样的方式会产生问题：
+当外面要求析构时，将stop设置为空，就不进行执行，与要求中执行完成有出入。
+- 里面不仅判定队列为空，而且需要判定当前是否为stop，然后还需要考虑stop但是不为空。这时候也要执行。
+- 注意很多类不允许复制传递。所以最好使用lambda表达式进行构造。
+最终ThreadPool类：[ThreadPool.hpp](ThreadPool.hpp)
+
+计划准备在下一章进行 缓冲区管理、异步 IO等内容。

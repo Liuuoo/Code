@@ -1,11 +1,13 @@
-#include "Resource.hpp"
-#include "auto_cahce_manager.hpp"
-
+#include"ThreadPool.hpp"
+void task()
+{
+    std::cout<<"hello\n";
+}
 int main()
 {
-    auto manager=auto_cahce_manager();
-    auto p1=manager.get_resource("1");
-    auto p2=manager.get_resource("1");
-    auto p3=manager.get_resource("2");
-    auto p4=manager.get_resource("2");
+    ThreadPool tp(5);
+    tp.enqueue([]() {
+    std::cout << "I am a lambda task running in thread " 
+              << std::this_thread::get_id() << std::endl;
+    });
 }
