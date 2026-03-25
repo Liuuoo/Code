@@ -6,7 +6,7 @@ vector<int> fa1(N);
 
 struct Node 
 {
-    int i,j;
+    ini,j;
     int e;    
 };
 
